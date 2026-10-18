@@ -844,27 +844,34 @@ class Organization(BitwardenBaseModel):
 def get_organization(
     bitwarden_client,
     organisation_id: UUID | str,
-    profile_org: "ProfileOrganization | None" = None,
 ) -> Organization:
     """
     Fetch an organization by ID.
 
-    If profile_org is provided and the user is not an Owner (Type != 0),
-    the GET api/organizations/{id} API call is skipped because that
-    endpoint is Owner-only. The Organization is built directly from
-    sync data (Id, Name) which is sufficient since collections(),
+    Checks sync data first: if the org is found and the user is not an
+    Owner (Type != 0), the GET api/organizations/{id} API call is skipped
+    because that endpoint is Owner-only. The Organization is built directly
+    from sync data (Id, Name) which is sufficient since collections(),
     ciphers(), and key() use less restricted endpoints.
-    """
 
-    # ProfileOrganization.Type is int, not OrganizationUserType enum.
-    if profile_org is not None and profile_org.Type != 0:
-        return Organization(
-            Id=profile_org.Id,
-            Name=profile_org.Name,
-            BillingEmail="",  # required but unknown
-            Object=None,
-            bitwarden_client=bitwarden_client,
-        )
+    If the user is an Owner, or the org is not in sync data, the normal
+    API call proceeds.
+    """
+    sync = bitwarden_client.sync()
+    for org in sync.Profile.Organizations:
+        if org.Id == organisation_id and org.Type != 0:
+            # Non-Owner: skip API call, build from sync data
+            return Organization(
+                Id=org.Id,
+                Name=org.Name,
+                BillingEmail="",
+                Object=None,
+                bitwarden_client=bitwarden_client,
+            )
+        if org.Id == organisation_id:
+            # Owner: proceed with normal API call
+            break
+
     resp = bitwarden_client.api_request("GET", f"api/organizations/{organisation_id}")
     return Organization.model_validate_json(
         resp.text,

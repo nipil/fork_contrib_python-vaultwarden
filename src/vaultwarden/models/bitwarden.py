@@ -842,11 +842,30 @@ class Organization(BitwardenBaseModel):
 
 
 def get_organization(
-    bitwarden_client, organisation_id: UUID | str
+    bitwarden_client,
+    organisation_id: UUID | str,
+    profile_org: "ProfileOrganization | None" = None,
 ) -> Organization:
-    resp = bitwarden_client.api_request(
-        "GET", f"api/organizations/{organisation_id}"
-    )
+    """
+    Fetch an organization by ID.
+
+    If profile_org is provided and the user is not an Owner (Type != 0),
+    the GET api/organizations/{id} API call is skipped because that
+    endpoint is Owner-only. The Organization is built directly from
+    sync data (Id, Name) which is sufficient since collections(),
+    ciphers(), and key() use less restricted endpoints.
+    """
+
+    # ProfileOrganization.Type is int, not OrganizationUserType enum.
+    if profile_org is not None and profile_org.Type != 0:
+        return Organization(
+            Id=profile_org.Id,
+            Name=profile_org.Name,
+            BillingEmail="",  # required but unknown
+            Object=None,
+            bitwarden_client=bitwarden_client,
+        )
+    resp = bitwarden_client.api_request("GET", f"api/organizations/{organisation_id}")
     return Organization.model_validate_json(
         resp.text,
         context={"client": bitwarden_client, "parent_id": organisation_id},
